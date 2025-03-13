@@ -323,8 +323,7 @@ def run_cmd(cmd, cwd=None):
 def check_node_in_object_info(node_id, object_info):
     """
     Check if a custom node is properly installed by examining the object_info response.
-    Looks for entries with python_module matching exactly 'custom_nodes.<node_id>' or
-    starting with 'custom_nodes.<node_id>.'
+    Looks for entries with python_module starting with 'custom_nodes.<node_id>'
     
     Args:
         node_id: The ID of the custom node to check
@@ -361,8 +360,6 @@ def create_json_result_template(node_name):
         "node_name": node_name,
         "timestamp": datetime.datetime.utcnow().isoformat(),
         "steps": {
-            "create_venv_status": {"success": False, "error_message": None},
-            "install_comfyui_status": {"success": False, "error_message": None},
             "freeze_requirements_before_install": {
                 "success": False,
                 "requirements_list": [],
@@ -376,8 +373,7 @@ def create_json_result_template(node_name):
                 "object_info_details": "",
                 "error_message": None
             },
-            "uninstall_node_status": {"success": False, "uninstall_log": "", "error_message": None},
-            "cleanup_env_status": {"success": False, "error_message": None}
+            "uninstall_node_status": {"success": False, "uninstall_log": "", "error_message": None}
         },
         "final_outcome": "PENDING"
     }
@@ -395,37 +391,10 @@ def main():
         result_data = create_json_result_template(node_name)
 
         # --------------------------------------------------------------------
-        # STEP 1: Create a new venv with uv
+        # STEP 1: Freeze the requirements.txt (before installing node)
         # --------------------------------------------------------------------
-        cmd_create_venv = "uv create comfy_env"
-        rc, out, err = run_cmd(cmd_create_venv)
-        if rc == 0:
-            result_data["steps"]["create_venv_status"]["success"] = True
-        else:
-            result_data["steps"]["create_venv_status"]["success"] = False
-            result_data["steps"]["create_venv_status"]["error_message"] = err
-            result_data["final_outcome"] = "FAILED_CREATE_VENV"
-            results.append(result_data)
-            continue
-
-        # --------------------------------------------------------------------
-        # STEP 2: Install ComfyUI in that venv
-        # --------------------------------------------------------------------
-        cmd_install_comfyui = f"uv run comfy_env -- pip install -e {COMFYUI_DIR}"
-        rc, out, err = run_cmd(cmd_install_comfyui)
-        if rc == 0:
-            result_data["steps"]["install_comfyui_status"]["success"] = True
-        else:
-            result_data["steps"]["install_comfyui_status"]["error_message"] = err
-            result_data["final_outcome"] = "FAILED_INSTALL_COMFYUI"
-            results.append(result_data)
-            continue
-
-        # --------------------------------------------------------------------
-        # STEP 3: Freeze the requirements.txt (before installing node)
-        # --------------------------------------------------------------------
-        cmd_freeze = "uv run comfy_env -- pip freeze"
-        rc, out, err = run_cmd(cmd_freeze)
+        cmd_freeze = "pip freeze"
+        rc, out, err = run_cmd(cmd_freeze, cwd=COMFYUI_DIR)
         if rc == 0:
             result_data["steps"]["freeze_requirements_before_install"]["success"] = True
             lines = out.strip().split("\n")
@@ -437,9 +406,9 @@ def main():
             continue
 
         # --------------------------------------------------------------------
-        # STEP 4: Install the custom node using Manager
+        # STEP 2: Install the custom node using Manager
         # --------------------------------------------------------------------
-        cmd_install_node = f"uv run comfy_env -- cm-cli install {node_name}"
+        cmd_install_node = f"cm-cli install {node_name}"
         rc, out, err = run_cmd(cmd_install_node, cwd=COMFYUI_DIR)
         if rc == 0:
             result_data["steps"]["install_node_status"]["success"] = True
@@ -453,9 +422,9 @@ def main():
             continue
 
         # --------------------------------------------------------------------
-        # STEP 5: Start ComfyUI and wait for it to be ready
+        # STEP 3: Start ComfyUI and wait for it to be ready
         # --------------------------------------------------------------------
-        cmd_start_comfyui = f"uv run comfy_env -- python {os.path.join(COMFYUI_DIR, 'main.py')} --port {COMFYUI_PORT}"
+        cmd_start_comfyui = f"python {os.path.join(COMFYUI_DIR, 'main.py')} --port {COMFYUI_PORT}"
         comfy_process = subprocess.Popen(cmd_start_comfyui.split(), cwd=COMFYUI_DIR)
         
         # Wait for ComfyUI to start (max 30 seconds)
@@ -481,7 +450,7 @@ def main():
             continue
 
         # --------------------------------------------------------------------
-        # STEP 6: Check object_info to verify custom node installation
+        # STEP 4: Check object_info to verify custom node installation
         # --------------------------------------------------------------------
         try:
             response = requests.get(f"http://127.0.0.1:{COMFYUI_PORT}/object_info", timeout=5)
@@ -503,25 +472,15 @@ def main():
             comfy_process.wait()
 
         # --------------------------------------------------------------------
-        # STEP 7: Uninstall the custom node
+        # STEP 5: Uninstall the custom node
         # --------------------------------------------------------------------
-        cmd_uninstall_node = f"uv run comfy_env -- cm-cli uninstall {node_name}"
+        cmd_uninstall_node = f"cm-cli uninstall {node_name}"
         rc, out, err = run_cmd(cmd_uninstall_node, cwd=COMFYUI_DIR)
         if rc == 0:
             result_data["steps"]["uninstall_node_status"]["success"] = True
         else:
             result_data["steps"]["uninstall_node_status"]["error_message"] = err
         result_data["steps"]["uninstall_node_status"]["uninstall_log"] = out + "\n" + err
-
-        # --------------------------------------------------------------------
-        # STEP 8: Cleanup the venv
-        # --------------------------------------------------------------------
-        cmd_cleanup = "uv remove comfy_env"
-        rc, out, err = run_cmd(cmd_cleanup)
-        if rc == 0:
-            result_data["steps"]["cleanup_env_status"]["success"] = True
-        else:
-            result_data["steps"]["cleanup_env_status"]["error_message"] = err
 
         # --------------------------------------------------------------------
         # Final outcome
