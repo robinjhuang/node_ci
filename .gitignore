@@ -1,3 +1,5 @@
 .venv
 __pycache__
 ComfyUI/*
+comfyui_test_log_*.log
+comfyui_test_result*.json

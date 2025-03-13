@@ -11,17 +11,13 @@ uv sync
 ```
 git clone https://github.com/comfyanonymous/ComfyUI
 cd ComfyUI
+git checkout rh-uvtest
 uv venv
 .venv/bin/python.exe -m ensurepip
-uv run ensurepip
-uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
-uv pip install -r requirements.txt
 
-cd custom_nodes
-git clone https://github.com/ltdrdata/ComfyUI-Manager
-cd ComfyUI-Manager
-uv pip install -r requirements.txt
-cd ../../
+git clone https://github.com/ltdrdata/ComfyUI-Manager custom_nodes
+uv sync --extra cpu # for mac
+uv sync --extra cu126 # for windows
 ```
 
 ### Run script

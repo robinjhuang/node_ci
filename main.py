@@ -72,6 +72,10 @@ def log_error(message):
     """Log an error message in red"""
     log_colored(f"✗ {message}", Fore.RED, logging.ERROR)
 
+def log_fatal(message):
+    """Log a fatal message in red"""
+    log_colored(f"FATAL: {message}", Fore.RED, logging.FATAL)
+
 def log_warning(message):
     """Log a warning message in yellow"""
     log_colored(message, Fore.YELLOW, logging.WARNING)
@@ -89,6 +93,19 @@ COMFYUI_DIR = os.path.abspath("./ComfyUI")  # ComfyUI installation directory usi
 COMFYUI_PORT = 8188  # Default ComfyUI port
 
 COMFYUI_MANAGER_DIR = os.path.join(COMFYUI_DIR, "custom_nodes", "ComfyUI-Manager")
+
+UV_SYNC_CMD = "uv sync --extra cu126"
+
+# If mac, use --cpu
+if sys.platform == "darwin":
+    UV_SYNC_CMD = "uv sync --extra cpu"
+
+# Set the correct virtual environment Python path based on platform
+if sys.platform == "win32":
+    VENV_PYTHON = ".venv\\Scripts\\python.exe"
+else:
+    VENV_PYTHON = ".venv/bin/python"
+
 
 # 1) Prepare list of top 100 custom nodes
 TOP_NODES = [
@@ -442,6 +459,10 @@ def create_json_result_template(node_name):
         "node_name": node_name,
         "timestamp": datetime.datetime.utcnow().isoformat(),
         "steps": {
+            "reset_venv": {
+                "success": False,
+                "error_message": None
+            },
             "freeze_requirements_before_install": {
                 "success": False,
                 "requirements_list": [],
@@ -486,26 +507,23 @@ def main():
             # --------------------------------------------------------------------
             # STEP 1: Freeze the requirements.txt (before installing node)
             # --------------------------------------------------------------------
-            logger.info(f"STEP 1: Freezing requirements before installing {node_name}...")
-            cmd_freeze = "uv pip freeze"
-            rc, out, err = run_cmd(cmd_freeze, cwd=COMFYUI_DIR)
+            logger.info(f"STEP 1: Reset the pip environment before installing {node_name}...")
+            rc, out, err = run_cmd(UV_SYNC_CMD, cwd=COMFYUI_DIR)
+            log_warning(f"Reset venv output: {out} {rc}")
             if rc == 0:
-                result_data["steps"]["freeze_requirements_before_install"]["success"] = True
-                lines = out.strip().split("\n")
-                result_data["steps"]["freeze_requirements_before_install"]["requirements_list"] = lines
-                log_success("Requirements frozen successfully")
+                result_data["steps"]["reset_venv"]["success"] = True
             else:
-                result_data["steps"]["freeze_requirements_before_install"]["error_message"] = err
-                result_data["final_outcome"] = "FAILED_FREEZE"
-                log_error(f"Failed to freeze requirements: {err}")
+                result_data["steps"]["reset_venv"]["error_message"] = err
+                result_data["final_outcome"] = "FAILED_RESET_VENV"
+                log_fatal(f"Failed to reset venv: {err}")
                 results.append(result_data)
-                continue
+                return
 
             # --------------------------------------------------------------------
             # STEP 2: Install the custom node using Manager
             # --------------------------------------------------------------------
             logger.info(f"STEP 2: Installing node {node_name}...")
-            cmd_install_node = f"uv run custom_nodes/ComfyUI-Manager/cm-cli.py install {node_name}"
+            cmd_install_node = f"{VENV_PYTHON} custom_nodes/ComfyUI-Manager/cm-cli.py install {node_name}"
             rc, out, err = run_cmd(cmd_install_node, cwd=COMFYUI_DIR)
             if rc == 0:
                 result_data["steps"]["install_node_status"]["success"] = True
