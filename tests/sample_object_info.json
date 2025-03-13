@@ -1,0 +1,84 @@
+{
+  "IPAdapterAdvanced": {
+    "name": "IPAdapterAdvanced",
+    "category": "ipadapter",
+    "output": ["MODEL"],
+    "output_is_list": [false],
+    "output_name": ["MODEL"],
+    "input": {
+      "model": ["MODEL"],
+      "clip_vision": ["CLIP_VISION"],
+      "image": ["IMAGE"],
+      "weight": ["FLOAT"],
+      "start_at": ["FLOAT"],
+      "end_at": ["FLOAT"],
+      "weight_type": ["COMBO[0]"]
+    },
+    "input_is_list": {
+      "model": false,
+      "clip_vision": false,
+      "image": false,
+      "weight": false,
+      "start_at": false,
+      "end_at": false,
+      "weight_type": false
+    },
+    "description": "Apply IP-Adapter to the model with advanced options",
+    "python_module": "custom_nodes.comfyui_ipadapter_plus.nodes",
+    "display_name": "IPAdapter Advanced (IP-Adapter Plus)"
+  },
+  "KSampler": {
+    "name": "KSampler",
+    "category": "sampling",
+    "output": ["LATENT"],
+    "output_is_list": [false],
+    "output_name": ["LATENT"],
+    "input": {
+      "model": ["MODEL"],
+      "seed": ["INT"],
+      "steps": ["INT"],
+      "cfg": ["FLOAT"],
+      "sampler_name": ["COMBO[0]"],
+      "scheduler": ["COMBO[0]"],
+      "positive": ["CONDITIONING"],
+      "negative": ["CONDITIONING"],
+      "latent_image": ["LATENT"],
+      "denoise": ["FLOAT"]
+    },
+    "input_is_list": {
+      "model": false,
+      "seed": false,
+      "steps": false,
+      "cfg": false,
+      "sampler_name": false,
+      "scheduler": false,
+      "positive": false,
+      "negative": false,
+      "latent_image": false,
+      "denoise": false
+    },
+    "description": "Samples latent noise into an image guided by the given conditioning",
+    "python_module": "comfy.samplers",
+    "display_name": "KSampler"
+  },
+  "ImpactWildcardEncode": {
+    "name": "ImpactWildcardEncode",
+    "category": "conditioning/wildcard",
+    "output": ["STRING"],
+    "output_is_list": [false],
+    "output_name": ["text"],
+    "input": {
+      "wildcard_text": ["STRING"],
+      "seed": ["INT"],
+      "random_generator": ["COMBO[0]"]
+    },
+    "input_is_list": {
+      "wildcard_text": false,
+      "seed": false,
+      "random_generator": false
+    },
+    "description": "Processes wildcards in the text and returns the processed text",
+    "python_module": "custom_nodes.comfyui-impact-pack.impact.wildcards",
+    "display_name": "Wildcard Encode (Impact)"
+  }
+} 
