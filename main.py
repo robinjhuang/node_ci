@@ -6,6 +6,10 @@ import time
 import os
 import logging
 import sys
+from colorama import init, Fore, Style
+
+# Initialize colorama
+init(autoreset=True)
 
 # Configure logging to write to both console and file
 timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -15,13 +19,34 @@ log_filename = f"comfyui_test_log_{timestamp}.log"
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+# Create console handler with color formatting
+class ColoredFormatter(logging.Formatter):
+    """Custom formatter to add colors to log messages"""
+    
+    COLORS = {
+        'INFO': Fore.CYAN,
+        'WARNING': Fore.YELLOW,
+        'ERROR': Fore.RED,
+        'CRITICAL': Fore.RED + Style.BRIGHT,
+        'DEBUG': Fore.WHITE
+    }
+    
+    def format(self, record):
+        levelname = record.levelname
+        color = self.COLORS.get(levelname, '')
+        reset = Style.RESET_ALL if color else ''
+        
+        # Format the message with color
+        record.msg = f"{color}{record.msg}{reset}"
+        return super().format(record)
+
 # Create console handler
 console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setLevel(logging.INFO)
-console_formatter = logging.Formatter('%(message)s')
+console_formatter = ColoredFormatter('%(message)s')
 console_handler.setFormatter(console_formatter)
 
-# Create file handler
+# Create file handler (without colors)
 file_handler = logging.FileHandler(log_filename, encoding='utf-8')
 file_handler.setLevel(logging.INFO)
 file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -30,6 +55,34 @@ file_handler.setFormatter(file_formatter)
 # Add handlers to logger
 logger.addHandler(console_handler)
 logger.addHandler(file_handler)
+
+# Utility function to log with specific color
+def log_colored(message, color=None, level=logging.INFO):
+    """Log a message with a specific color"""
+    if color:
+        message = f"{color}{message}{Style.RESET_ALL}"
+    logger.log(level, message)
+
+# Shortcut functions for common colored logs
+def log_success(message):
+    """Log a success message in green"""
+    log_colored(f"✓ {message}", Fore.GREEN)
+
+def log_error(message):
+    """Log an error message in red"""
+    log_colored(f"✗ {message}", Fore.RED, logging.ERROR)
+
+def log_warning(message):
+    """Log a warning message in yellow"""
+    log_colored(message, Fore.YELLOW, logging.WARNING)
+
+def log_command(message):
+    """Log a command in bright yellow"""
+    log_colored(message, Fore.YELLOW + Style.BRIGHT)
+
+def log_separator(char="-", length=80):
+    """Log a separator line"""
+    log_colored(char * length, Fore.WHITE)
 
 # Configuration
 COMFYUI_DIR = os.path.abspath("./ComfyUI")  # ComfyUI installation directory using absolute path
@@ -344,7 +397,7 @@ TOP_NODES = [
 # Utility function to run commands in a shell and capture output.
 # Returns (return_code, stdout, stderr).
 def run_cmd(cmd, cwd=None):
-    print(f"Running command: {cmd}")
+    log_command(f"Running command: {cmd}")
     process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
     out, err = process.communicate()
     return process.returncode, out.decode("utf-8", errors="replace"), err.decode("utf-8", errors="replace")
@@ -409,59 +462,58 @@ def create_json_result_template(node_name):
 
 def main():
     if not os.path.exists(COMFYUI_DIR):
-        print(f"Error: ComfyUI directory not found at {COMFYUI_DIR}")
-        print("Please set the correct COMFYUI_DIR at the top of the script")
+        log_error(f"ComfyUI directory not found at {COMFYUI_DIR}")
+        log_error("Please set the correct COMFYUI_DIR at the top of the script")
         return
 
     results = []
     
-    print(f"Starting test of {len(TOP_NODES)} custom nodes...")
-    print(f"ComfyUI directory: {COMFYUI_DIR}")
-    print(f"ComfyUI port: {COMFYUI_PORT}")
-    print("-" * 80)
+    logger.info(f"Starting test of {len(TOP_NODES)} custom nodes...")
+    logger.info(f"ComfyUI directory: {COMFYUI_DIR}")
+    logger.info(f"ComfyUI port: {COMFYUI_PORT}")
+    log_separator()
 
     for i, node in enumerate(TOP_NODES):
         node_name = node["id"]
-        print(f"\n[{i+1}/{len(TOP_NODES)}] Testing node: {node_name}")
-        print("=" * 80)
+        log_colored(f"\n[{i+1}/{len(TOP_NODES)}] Testing node: {node_name}", Fore.CYAN)
+        log_separator("=")
         
         result_data = create_json_result_template(node_name)
+        # Define comfy_process at the beginning of the loop
+        comfy_process = None
 
         try:
-            # Initialize comfy_process to None
-            comfy_process = None
-            
             # --------------------------------------------------------------------
             # STEP 1: Freeze the requirements.txt (before installing node)
             # --------------------------------------------------------------------
-            print(f"STEP 1: Freezing requirements before installing {node_name}...")
+            logger.info(f"STEP 1: Freezing requirements before installing {node_name}...")
             cmd_freeze = "uv pip freeze"
             rc, out, err = run_cmd(cmd_freeze, cwd=COMFYUI_DIR)
             if rc == 0:
                 result_data["steps"]["freeze_requirements_before_install"]["success"] = True
                 lines = out.strip().split("\n")
                 result_data["steps"]["freeze_requirements_before_install"]["requirements_list"] = lines
-                print("✓ Requirements frozen successfully")
+                log_success("Requirements frozen successfully")
             else:
                 result_data["steps"]["freeze_requirements_before_install"]["error_message"] = err
                 result_data["final_outcome"] = "FAILED_FREEZE"
-                print(f"✗ Failed to freeze requirements: {err}")
+                log_error(f"Failed to freeze requirements: {err}")
                 results.append(result_data)
                 continue
 
             # --------------------------------------------------------------------
             # STEP 2: Install the custom node using Manager
             # --------------------------------------------------------------------
-            print(f"STEP 2: Installing node {node_name}...")
+            logger.info(f"STEP 2: Installing node {node_name}...")
             cmd_install_node = f"uv run custom_nodes/ComfyUI-Manager/cm-cli.py install {node_name}"
             rc, out, err = run_cmd(cmd_install_node, cwd=COMFYUI_DIR)
             if rc == 0:
                 result_data["steps"]["install_node_status"]["success"] = True
-                print(f"✓ Node {node_name} installed successfully")
+                log_success(f"Node {node_name} installed successfully")
             else:
                 result_data["steps"]["install_node_status"]["error_message"] = err
                 result_data["final_outcome"] = "FAILED_INSTALL_NODE"
-                print(f"✗ Failed to install node: {err}")
+                log_error(f"Failed to install node: {err}")
                 results.append(result_data)
                 continue
             result_data["steps"]["install_node_status"]["install_log"] = out + "\n" + err
@@ -469,20 +521,20 @@ def main():
             # --------------------------------------------------------------------
             # STEP 3: Start ComfyUI and wait for it to be ready
             # --------------------------------------------------------------------
-            print("STEP 3: Starting ComfyUI server...")
+            logger.info("STEP 3: Starting ComfyUI server...")
             cmd_start_comfyui = "uv run main.py"
             comfy_process = subprocess.Popen(cmd_start_comfyui.split(), cwd=COMFYUI_DIR)
             
             # Wait for ComfyUI to start (max 60 seconds)
             start_time = time.time()
             server_ready = False
-            print("Waiting for ComfyUI server to start (timeout: 60s)...")
+            log_warning("Waiting for ComfyUI server to start (timeout: 60s)...")
             while time.time() - start_time < 60:
                 try:
                     response = requests.get("http://127.0.0.1:8188/queue", timeout=1)
                     if response.status_code == 200:
                         server_ready = True
-                        print(f"✓ ComfyUI server started after {int(time.time() - start_time)} seconds")
+                        log_success(f"ComfyUI server started after {int(time.time() - start_time)} seconds")
                         break
                 except requests.exceptions.RequestException:
                     time.sleep(1)
@@ -493,7 +545,7 @@ def main():
             else:
                 result_data["steps"]["restart_comfyui_status"]["error_message"] = "Server failed to start within 60 seconds"
                 result_data["final_outcome"] = "FAILED_START_COMFY"
-                print("✗ ComfyUI server failed to start within timeout period")
+                log_error("ComfyUI server failed to start within timeout period")
                 if comfy_process:
                     comfy_process.terminate()
                 results.append(result_data)
@@ -502,7 +554,7 @@ def main():
             # --------------------------------------------------------------------
             # STEP 4: Check object_info to verify custom node installation
             # --------------------------------------------------------------------
-            print(f"STEP 4: Checking if node {node_name} is properly installed...")
+            logger.info(f"STEP 4: Checking if node {node_name} is properly installed...")
             try:
                 response = requests.get(f"http://127.0.0.1:{COMFYUI_PORT}/object_info", timeout=5)
                 if response.status_code == 200:
@@ -513,36 +565,36 @@ def main():
                     result_data["steps"]["object_info_check"]["object_info_details"] = details
                     
                     if found:
-                        print(f"✓ Node {node_name} found in object_info")
+                        log_success(f"Node {node_name} found in object_info")
                     else:
-                        print(f"✗ Node {node_name} NOT found in object_info")
+                        log_error(f"Node {node_name} NOT found in object_info")
                 else:
                     result_data["steps"]["object_info_check"]["success"] = False
                     result_data["steps"]["object_info_check"]["error_message"] = f"Status code {response.status_code}"
-                    print(f"✗ Failed to get object_info: Status code {response.status_code}")
+                    log_error(f"Failed to get object_info: Status code {response.status_code}")
             except Exception as e:
                 result_data["steps"]["object_info_check"]["success"] = False
                 result_data["steps"]["object_info_check"]["error_message"] = str(e)
-                print(f"✗ Error checking object_info: {str(e)}")
+                log_error(f"Error checking object_info: {str(e)}")
             finally:
                 # Cleanup ComfyUI process
                 if comfy_process:
-                    print("Terminating ComfyUI server...")
+                    log_warning("Terminating ComfyUI server...")
                     comfy_process.terminate()
                     comfy_process.wait()
 
             # --------------------------------------------------------------------
             # STEP 5: Uninstall the custom node
             # --------------------------------------------------------------------
-            print(f"STEP 5: Uninstalling node {node_name}...")
+            logger.info(f"STEP 5: Uninstalling node {node_name}...")
             cmd_uninstall_node = f"uv run custom_nodes/ComfyUI-Manager/cm-cli.py uninstall {node_name}"
             rc, out, err = run_cmd(cmd_uninstall_node, cwd=COMFYUI_DIR)
             if rc == 0:
                 result_data["steps"]["uninstall_node_status"]["success"] = True
-                print(f"✓ Node {node_name} uninstalled successfully")
+                log_success(f"Node {node_name} uninstalled successfully")
             else:
                 result_data["steps"]["uninstall_node_status"]["error_message"] = err
-                print(f"✗ Failed to uninstall node: {err}")
+                log_error(f"Failed to uninstall node: {err}")
             result_data["steps"]["uninstall_node_status"]["uninstall_log"] = out + "\n" + err
 
             # --------------------------------------------------------------------
@@ -550,28 +602,28 @@ def main():
             # --------------------------------------------------------------------
             if not result_data["steps"]["object_info_check"]["success"]:
                 result_data["final_outcome"] = "FAILED_OBJECT_INFO_CHECK"
-                print("Final outcome: FAILED_OBJECT_INFO_CHECK")
+                log_error("Final outcome: FAILED_OBJECT_INFO_CHECK")
             elif not result_data["steps"]["object_info_check"]["found_in_object_info"]:
                 result_data["final_outcome"] = "FAILED_NODE_NOT_FOUND"
-                print("Final outcome: FAILED_NODE_NOT_FOUND")
+                log_error("Final outcome: FAILED_NODE_NOT_FOUND")
             else:   
                 result_data["final_outcome"] = "PASSED"
-                print("Final outcome: PASSED")
+                log_success("Final outcome: PASSED")
 
         except Exception as e:
             # Catch any unexpected errors to ensure we continue with the next node
-            print(f"Unexpected error testing node {node_name}: {str(e)}")
+            log_error(f"Unexpected error testing node {node_name}: {str(e)}")
             result_data["final_outcome"] = "UNEXPECTED_ERROR"
             result_data["error_message"] = str(e)
             
             # Make sure to terminate ComfyUI if it's running
-            if 'comfy_process' in locals() and comfy_process is not None:
+            if comfy_process is not None:
                 comfy_process.terminate()
                 comfy_process.wait()
 
         # Add to overall results
         results.append(result_data)
-        print("-" * 80)
+        log_separator()
 
     # ------------------------------------------------------------------------
     # Save results to a JSON file
@@ -582,14 +634,14 @@ def main():
         json.dump(results, f, indent=2)
 
     # Print summary
-    print("\nTest Summary:")
-    print("=" * 80)
+    logger.info("\nTest Summary:")
+    log_separator("=")
     passed = sum(1 for r in results if r["final_outcome"] == "PASSED")
     failed = len(results) - passed
-    print(f"Total nodes tested: {len(results)}")
-    print(f"Passed: {passed}")
-    print(f"Failed: {failed}")
-    print(f"Test results saved to {out_filename}")
+    logger.info(f"Total nodes tested: {len(results)}")
+    log_colored(f"Passed: {passed}", Fore.GREEN)
+    log_colored(f"Failed: {failed}", Fore.RED)
+    logger.info(f"Test results saved to {out_filename}")
 
 if __name__ == "__main__":
     main()
