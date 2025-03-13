@@ -9,6 +9,8 @@ import os
 COMFYUI_DIR = os.path.expanduser("~/ComfyUI")  # Default ComfyUI installation directory
 COMFYUI_PORT = 8188  # Default ComfyUI port
 
+COMFYUI_MANAGER_DIR = os.path.join(COMFYUI_DIR, "custom_nodes", "ComfyUI-Manager")
+
 # 1) Prepare list of top 100 custom nodes
 TOP_NODES = [
   {
@@ -316,6 +318,7 @@ TOP_NODES = [
 # Utility function to run commands in a shell and capture output.
 # Returns (return_code, stdout, stderr).
 def run_cmd(cmd, cwd=None):
+    print(f"Running command: {cmd}")
     process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
     out, err = process.communicate()
     return process.returncode, out.decode("utf-8", errors="replace"), err.decode("utf-8", errors="replace")
@@ -393,7 +396,7 @@ def main():
         # --------------------------------------------------------------------
         # STEP 1: Freeze the requirements.txt (before installing node)
         # --------------------------------------------------------------------
-        cmd_freeze = "pip freeze"
+        cmd_freeze = "uv pip freeze"
         rc, out, err = run_cmd(cmd_freeze, cwd=COMFYUI_DIR)
         if rc == 0:
             result_data["steps"]["freeze_requirements_before_install"]["success"] = True
@@ -408,7 +411,7 @@ def main():
         # --------------------------------------------------------------------
         # STEP 2: Install the custom node using Manager
         # --------------------------------------------------------------------
-        cmd_install_node = f"cm-cli install {node_name}"
+        cmd_install_node = f"uv run custom_nodes/ComfyUI-Manager/cm-cli.py install {node_name}"
         rc, out, err = run_cmd(cmd_install_node, cwd=COMFYUI_DIR)
         if rc == 0:
             result_data["steps"]["install_node_status"]["success"] = True
@@ -424,15 +427,15 @@ def main():
         # --------------------------------------------------------------------
         # STEP 3: Start ComfyUI and wait for it to be ready
         # --------------------------------------------------------------------
-        cmd_start_comfyui = f"python {os.path.join(COMFYUI_DIR, 'main.py')} --port {COMFYUI_PORT}"
+        cmd_start_comfyui = "uv run main.py"
         comfy_process = subprocess.Popen(cmd_start_comfyui.split(), cwd=COMFYUI_DIR)
         
         # Wait for ComfyUI to start (max 30 seconds)
         start_time = time.time()
         server_ready = False
-        while time.time() - start_time < 30:
+        while time.time() - start_time < 60:
             try:
-                response = requests.get(f"http://127.0.0.1:{COMFYUI_PORT}/", timeout=1)
+                response = requests.get("http://127.0.0.1:8188/queue", timeout=1)
                 if response.status_code == 200:
                     server_ready = True
                     break
@@ -443,7 +446,7 @@ def main():
         if server_ready:
             result_data["steps"]["restart_comfyui_status"]["success"] = True
         else:
-            result_data["steps"]["restart_comfyui_status"]["error_message"] = "Server failed to start within 30 seconds"
+            result_data["steps"]["restart_comfyui_status"]["error_message"] = "Server failed to start within 60 seconds"
             result_data["final_outcome"] = "FAILED_START_COMFY"
             comfy_process.terminate()
             results.append(result_data)
@@ -460,6 +463,7 @@ def main():
                 result_data["steps"]["object_info_check"]["success"] = True
                 result_data["steps"]["object_info_check"]["found_in_object_info"] = found
                 result_data["steps"]["object_info_check"]["object_info_details"] = details
+                result_data["steps"]["object_info_check"]["raw_object_info"] = object_info
             else:
                 result_data["steps"]["object_info_check"]["success"] = False
                 result_data["steps"]["object_info_check"]["error_message"] = f"Status code {response.status_code}"
@@ -474,7 +478,7 @@ def main():
         # --------------------------------------------------------------------
         # STEP 5: Uninstall the custom node
         # --------------------------------------------------------------------
-        cmd_uninstall_node = f"cm-cli uninstall {node_name}"
+        cmd_uninstall_node = f"uv run custom_nodes/ComfyUI-Manager/cm-cli.py uninstall {node_name}"
         rc, out, err = run_cmd(cmd_uninstall_node, cwd=COMFYUI_DIR)
         if rc == 0:
             result_data["steps"]["uninstall_node_status"]["success"] = True
