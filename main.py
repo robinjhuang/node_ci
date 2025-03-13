@@ -388,116 +388,161 @@ def main():
         return
 
     results = []
+    
+    print(f"Starting test of {len(TOP_NODES)} custom nodes...")
+    print(f"ComfyUI directory: {COMFYUI_DIR}")
+    print(f"ComfyUI port: {COMFYUI_PORT}")
+    print("-" * 80)
 
-    for node in TOP_NODES:
+    for i, node in enumerate(TOP_NODES):
         node_name = node["id"]
+        print(f"\n[{i+1}/{len(TOP_NODES)}] Testing node: {node_name}")
+        print("=" * 80)
+        
         result_data = create_json_result_template(node_name)
 
-        # --------------------------------------------------------------------
-        # STEP 1: Freeze the requirements.txt (before installing node)
-        # --------------------------------------------------------------------
-        cmd_freeze = "uv pip freeze"
-        rc, out, err = run_cmd(cmd_freeze, cwd=COMFYUI_DIR)
-        if rc == 0:
-            result_data["steps"]["freeze_requirements_before_install"]["success"] = True
-            lines = out.strip().split("\n")
-            result_data["steps"]["freeze_requirements_before_install"]["requirements_list"] = lines
-        else:
-            result_data["steps"]["freeze_requirements_before_install"]["error_message"] = err
-            result_data["final_outcome"] = "FAILED_FREEZE"
-            results.append(result_data)
-            continue
-
-        # --------------------------------------------------------------------
-        # STEP 2: Install the custom node using Manager
-        # --------------------------------------------------------------------
-        cmd_install_node = f"uv run custom_nodes/ComfyUI-Manager/cm-cli.py install {node_name}"
-        rc, out, err = run_cmd(cmd_install_node, cwd=COMFYUI_DIR)
-        if rc == 0:
-            result_data["steps"]["install_node_status"]["success"] = True
-        else:
-            result_data["steps"]["install_node_status"]["error_message"] = err
-        result_data["steps"]["install_node_status"]["install_log"] = out + "\n" + err
-
-        if rc != 0:
-            result_data["final_outcome"] = "FAILED_INSTALL_NODE"
-            results.append(result_data)
-            continue
-
-        # --------------------------------------------------------------------
-        # STEP 3: Start ComfyUI and wait for it to be ready
-        # --------------------------------------------------------------------
-        cmd_start_comfyui = "uv run main.py"
-        comfy_process = subprocess.Popen(cmd_start_comfyui.split(), cwd=COMFYUI_DIR)
-        
-        # Wait for ComfyUI to start (max 30 seconds)
-        start_time = time.time()
-        server_ready = False
-        while time.time() - start_time < 60:
-            try:
-                response = requests.get("http://127.0.0.1:8188/queue", timeout=1)
-                if response.status_code == 200:
-                    server_ready = True
-                    break
-            except requests.exceptions.RequestException:
-                time.sleep(1)
+        try:
+            # --------------------------------------------------------------------
+            # STEP 1: Freeze the requirements.txt (before installing node)
+            # --------------------------------------------------------------------
+            print(f"STEP 1: Freezing requirements before installing {node_name}...")
+            cmd_freeze = "uv pip freeze"
+            rc, out, err = run_cmd(cmd_freeze, cwd=COMFYUI_DIR)
+            if rc == 0:
+                result_data["steps"]["freeze_requirements_before_install"]["success"] = True
+                lines = out.strip().split("\n")
+                result_data["steps"]["freeze_requirements_before_install"]["requirements_list"] = lines
+                print("✓ Requirements frozen successfully")
+            else:
+                result_data["steps"]["freeze_requirements_before_install"]["error_message"] = err
+                result_data["final_outcome"] = "FAILED_FREEZE"
+                print(f"✗ Failed to freeze requirements: {err}")
+                results.append(result_data)
                 continue
 
-        if server_ready:
-            result_data["steps"]["restart_comfyui_status"]["success"] = True
-        else:
-            result_data["steps"]["restart_comfyui_status"]["error_message"] = "Server failed to start within 60 seconds"
-            result_data["final_outcome"] = "FAILED_START_COMFY"
-            comfy_process.terminate()
-            results.append(result_data)
-            continue
-
-        # --------------------------------------------------------------------
-        # STEP 4: Check object_info to verify custom node installation
-        # --------------------------------------------------------------------
-        try:
-            response = requests.get(f"http://127.0.0.1:{COMFYUI_PORT}/object_info", timeout=5)
-            if response.status_code == 200:
-                object_info = response.json()
-                found, details = check_node_in_object_info(node_name, object_info)
-                result_data["steps"]["object_info_check"]["success"] = True
-                result_data["steps"]["object_info_check"]["found_in_object_info"] = found
-                result_data["steps"]["object_info_check"]["object_info_details"] = details
-                result_data["steps"]["object_info_check"]["raw_object_info"] = object_info
+            # --------------------------------------------------------------------
+            # STEP 2: Install the custom node using Manager
+            # --------------------------------------------------------------------
+            print(f"STEP 2: Installing node {node_name}...")
+            cmd_install_node = f"uv run custom_nodes/ComfyUI-Manager/cm-cli.py install {node_name}"
+            rc, out, err = run_cmd(cmd_install_node, cwd=COMFYUI_DIR)
+            if rc == 0:
+                result_data["steps"]["install_node_status"]["success"] = True
+                print(f"✓ Node {node_name} installed successfully")
             else:
+                result_data["steps"]["install_node_status"]["error_message"] = err
+                result_data["final_outcome"] = "FAILED_INSTALL_NODE"
+                print(f"✗ Failed to install node: {err}")
+                results.append(result_data)
+                continue
+            result_data["steps"]["install_node_status"]["install_log"] = out + "\n" + err
+
+            # --------------------------------------------------------------------
+            # STEP 3: Start ComfyUI and wait for it to be ready
+            # --------------------------------------------------------------------
+            print(f"STEP 3: Starting ComfyUI server...")
+            cmd_start_comfyui = "uv run main.py"
+            comfy_process = subprocess.Popen(cmd_start_comfyui.split(), cwd=COMFYUI_DIR)
+            
+            # Wait for ComfyUI to start (max 60 seconds)
+            start_time = time.time()
+            server_ready = False
+            print("Waiting for ComfyUI server to start (timeout: 60s)...")
+            while time.time() - start_time < 60:
+                try:
+                    response = requests.get("http://127.0.0.1:8188/queue", timeout=1)
+                    if response.status_code == 200:
+                        server_ready = True
+                        print(f"✓ ComfyUI server started after {int(time.time() - start_time)} seconds")
+                        break
+                except requests.exceptions.RequestException:
+                    time.sleep(1)
+                    continue
+
+            if server_ready:
+                result_data["steps"]["restart_comfyui_status"]["success"] = True
+            else:
+                result_data["steps"]["restart_comfyui_status"]["error_message"] = "Server failed to start within 60 seconds"
+                result_data["final_outcome"] = "FAILED_START_COMFY"
+                print("✗ ComfyUI server failed to start within timeout period")
+                if comfy_process:
+                    comfy_process.terminate()
+                results.append(result_data)
+                continue
+
+            # --------------------------------------------------------------------
+            # STEP 4: Check object_info to verify custom node installation
+            # --------------------------------------------------------------------
+            print(f"STEP 4: Checking if node {node_name} is properly installed...")
+            try:
+                response = requests.get(f"http://127.0.0.1:{COMFYUI_PORT}/object_info", timeout=5)
+                if response.status_code == 200:
+                    object_info = response.json()
+                    found, details = check_node_in_object_info(node_name, object_info)
+                    result_data["steps"]["object_info_check"]["success"] = True
+                    result_data["steps"]["object_info_check"]["found_in_object_info"] = found
+                    result_data["steps"]["object_info_check"]["object_info_details"] = details
+                    
+                    if found:
+                        print(f"✓ Node {node_name} found in object_info")
+                    else:
+                        print(f"✗ Node {node_name} NOT found in object_info")
+                else:
+                    result_data["steps"]["object_info_check"]["success"] = False
+                    result_data["steps"]["object_info_check"]["error_message"] = f"Status code {response.status_code}"
+                    print(f"✗ Failed to get object_info: Status code {response.status_code}")
+            except Exception as e:
                 result_data["steps"]["object_info_check"]["success"] = False
-                result_data["steps"]["object_info_check"]["error_message"] = f"Status code {response.status_code}"
+                result_data["steps"]["object_info_check"]["error_message"] = str(e)
+                print(f"✗ Error checking object_info: {str(e)}")
+            finally:
+                # Cleanup ComfyUI process
+                if comfy_process:
+                    print("Terminating ComfyUI server...")
+                    comfy_process.terminate()
+                    comfy_process.wait()
+
+            # --------------------------------------------------------------------
+            # STEP 5: Uninstall the custom node
+            # --------------------------------------------------------------------
+            print(f"STEP 5: Uninstalling node {node_name}...")
+            cmd_uninstall_node = f"uv run custom_nodes/ComfyUI-Manager/cm-cli.py uninstall {node_name}"
+            rc, out, err = run_cmd(cmd_uninstall_node, cwd=COMFYUI_DIR)
+            if rc == 0:
+                result_data["steps"]["uninstall_node_status"]["success"] = True
+                print(f"✓ Node {node_name} uninstalled successfully")
+            else:
+                result_data["steps"]["uninstall_node_status"]["error_message"] = err
+                print(f"✗ Failed to uninstall node: {err}")
+            result_data["steps"]["uninstall_node_status"]["uninstall_log"] = out + "\n" + err
+
+            # --------------------------------------------------------------------
+            # Final outcome
+            # --------------------------------------------------------------------
+            if not result_data["steps"]["object_info_check"]["success"]:
+                result_data["final_outcome"] = "FAILED_OBJECT_INFO_CHECK"
+                print(f"Final outcome: FAILED_OBJECT_INFO_CHECK")
+            elif not result_data["steps"]["object_info_check"]["found_in_object_info"]:
+                result_data["final_outcome"] = "FAILED_NODE_NOT_FOUND"
+                print(f"Final outcome: FAILED_NODE_NOT_FOUND")
+            else:
+                result_data["final_outcome"] = "PASSED"
+                print(f"Final outcome: PASSED")
+
         except Exception as e:
-            result_data["steps"]["object_info_check"]["success"] = False
-            result_data["steps"]["object_info_check"]["error_message"] = str(e)
-        finally:
-            # Cleanup ComfyUI process
-            comfy_process.terminate()
-            comfy_process.wait()
-
-        # --------------------------------------------------------------------
-        # STEP 5: Uninstall the custom node
-        # --------------------------------------------------------------------
-        cmd_uninstall_node = f"uv run custom_nodes/ComfyUI-Manager/cm-cli.py uninstall {node_name}"
-        rc, out, err = run_cmd(cmd_uninstall_node, cwd=COMFYUI_DIR)
-        if rc == 0:
-            result_data["steps"]["uninstall_node_status"]["success"] = True
-        else:
-            result_data["steps"]["uninstall_node_status"]["error_message"] = err
-        result_data["steps"]["uninstall_node_status"]["uninstall_log"] = out + "\n" + err
-
-        # --------------------------------------------------------------------
-        # Final outcome
-        # --------------------------------------------------------------------
-        if not result_data["steps"]["object_info_check"]["success"]:
-            result_data["final_outcome"] = "FAILED_OBJECT_INFO_CHECK"
-        elif not result_data["steps"]["object_info_check"]["found_in_object_info"]:
-            result_data["final_outcome"] = "FAILED_NODE_NOT_FOUND"
-        else:
-            result_data["final_outcome"] = "PASSED"
+            # Catch any unexpected errors to ensure we continue with the next node
+            print(f"Unexpected error testing node {node_name}: {str(e)}")
+            result_data["final_outcome"] = "UNEXPECTED_ERROR"
+            result_data["error_message"] = str(e)
+            
+            # Make sure to terminate ComfyUI if it's running
+            if 'comfy_process' in locals() and comfy_process:
+                comfy_process.terminate()
+                comfy_process.wait()
 
         # Add to overall results
         results.append(result_data)
+        print("-" * 80)
 
     # ------------------------------------------------------------------------
     # Save results to a JSON file
@@ -507,6 +552,14 @@ def main():
     with open(out_filename, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
 
+    # Print summary
+    print("\nTest Summary:")
+    print("=" * 80)
+    passed = sum(1 for r in results if r["final_outcome"] == "PASSED")
+    failed = len(results) - passed
+    print(f"Total nodes tested: {len(results)}")
+    print(f"Passed: {passed}")
+    print(f"Failed: {failed}")
     print(f"Test results saved to {out_filename}")
 
 if __name__ == "__main__":
