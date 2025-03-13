@@ -4,9 +4,35 @@ import datetime
 import requests
 import time
 import os
+import logging
+import sys
+
+# Configure logging to write to both console and file
+timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+log_filename = f"comfyui_test_log_{timestamp}.log"
+
+# Create logger
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+# Create console handler
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setLevel(logging.INFO)
+console_formatter = logging.Formatter('%(message)s')
+console_handler.setFormatter(console_formatter)
+
+# Create file handler
+file_handler = logging.FileHandler(log_filename, encoding='utf-8')
+file_handler.setLevel(logging.INFO)
+file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(file_formatter)
+
+# Add handlers to logger
+logger.addHandler(console_handler)
+logger.addHandler(file_handler)
 
 # Configuration
-COMFYUI_DIR = os.path.expanduser("~/ComfyUI")  # Default ComfyUI installation directory
+COMFYUI_DIR = os.path.abspath("./ComfyUI")  # ComfyUI installation directory using absolute path
 COMFYUI_PORT = 8188  # Default ComfyUI port
 
 COMFYUI_MANAGER_DIR = os.path.join(COMFYUI_DIR, "custom_nodes", "ComfyUI-Manager")
@@ -402,6 +428,9 @@ def main():
         result_data = create_json_result_template(node_name)
 
         try:
+            # Initialize comfy_process to None
+            comfy_process = None
+            
             # --------------------------------------------------------------------
             # STEP 1: Freeze the requirements.txt (before installing node)
             # --------------------------------------------------------------------
@@ -440,7 +469,7 @@ def main():
             # --------------------------------------------------------------------
             # STEP 3: Start ComfyUI and wait for it to be ready
             # --------------------------------------------------------------------
-            print(f"STEP 3: Starting ComfyUI server...")
+            print("STEP 3: Starting ComfyUI server...")
             cmd_start_comfyui = "uv run main.py"
             comfy_process = subprocess.Popen(cmd_start_comfyui.split(), cwd=COMFYUI_DIR)
             
@@ -521,13 +550,13 @@ def main():
             # --------------------------------------------------------------------
             if not result_data["steps"]["object_info_check"]["success"]:
                 result_data["final_outcome"] = "FAILED_OBJECT_INFO_CHECK"
-                print(f"Final outcome: FAILED_OBJECT_INFO_CHECK")
+                print("Final outcome: FAILED_OBJECT_INFO_CHECK")
             elif not result_data["steps"]["object_info_check"]["found_in_object_info"]:
                 result_data["final_outcome"] = "FAILED_NODE_NOT_FOUND"
-                print(f"Final outcome: FAILED_NODE_NOT_FOUND")
-            else:
+                print("Final outcome: FAILED_NODE_NOT_FOUND")
+            else:   
                 result_data["final_outcome"] = "PASSED"
-                print(f"Final outcome: PASSED")
+                print("Final outcome: PASSED")
 
         except Exception as e:
             # Catch any unexpected errors to ensure we continue with the next node
@@ -536,7 +565,7 @@ def main():
             result_data["error_message"] = str(e)
             
             # Make sure to terminate ComfyUI if it's running
-            if 'comfy_process' in locals() and comfy_process:
+            if 'comfy_process' in locals() and comfy_process is not None:
                 comfy_process.terminate()
                 comfy_process.wait()
 
