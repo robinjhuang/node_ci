@@ -601,6 +601,9 @@ def main():
                     if comfy_process:
                         comfy_process.terminate()
                         comfy_process.wait()
+                        log_success("ComfyUI process terminated successfully")
+                        comfy_process = None
+                        
                     results.append(result_data)
                     continue
 
@@ -635,6 +638,8 @@ def main():
                         log_warning("Terminating ComfyUI server...")
                         comfy_process.terminate()
                         comfy_process.wait()
+                        log_success("ComfyUI process terminated successfully")
+                        comfy_process = None
 
                 # --------------------------------------------------------------------
                 # STEP 5: Uninstall the custom node
@@ -677,12 +682,14 @@ def main():
                         comfy_process.terminate()
                         # Add a timeout to wait() to prevent hanging indefinitely
                         comfy_process.wait(timeout=10)
+                        log_success("ComfyUI process terminated successfully")
                     except subprocess.TimeoutExpired:
                         # If terminate doesn't work, try kill (more forceful)
                         log_error("ComfyUI process didn't terminate, forcing kill...")
                         comfy_process.kill()
                         try:
                             comfy_process.wait(timeout=5)
+                            log_success("ComfyUI process killed successfully")
                         except subprocess.TimeoutExpired:
                             log_error("Failed to kill ComfyUI process!")
                     except Exception as e:
@@ -726,6 +733,7 @@ def main():
                 try:
                     comfy_process.kill()
                     comfy_process.wait(timeout=5)
+                    log_success("ComfyUI process killed successfully")
                 except:
                     log_error("Failed to terminate ComfyUI in final cleanup")
 
