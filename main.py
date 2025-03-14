@@ -413,9 +413,30 @@ TOP_NODES = [
 
 # Utility function to run commands in a shell and capture output.
 # Returns (return_code, stdout, stderr).
-def run_cmd(cmd, cwd=None):
-    log_command(f"Running command: {cmd}")
-    process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
+def run_cmd(cmd, cwd=None, env=None):
+    """
+    Run a command in a shell and capture output.
+    Args:
+        cmd: Command to run
+        cwd: Working directory for the command
+        env: Dictionary of environment variables to add/override
+    """
+    log_command(f"Running command: {cmd} {env} {cwd}")
+    
+    # Start with current environment
+    process_env = os.environ.copy()
+    # Update with any additional environment variables
+    if env:
+        process_env.update(env)
+    
+    process = subprocess.Popen(
+        cmd, 
+        shell=True, 
+        stdout=subprocess.PIPE, 
+        stderr=subprocess.PIPE, 
+        cwd=cwd,
+        env=process_env
+    )
     out, err = process.communicate()
     return process.returncode, out.decode("utf-8", errors="replace"), err.decode("utf-8", errors="replace")
 
@@ -508,7 +529,7 @@ def main():
             # STEP 1: Freeze the requirements.txt (before installing node)
             # --------------------------------------------------------------------
             logger.info(f"STEP 1: Reset the pip environment before installing {node_name}...")
-            rc, out, err = run_cmd(UV_SYNC_CMD, cwd=COMFYUI_DIR)
+            rc, out, err = run_cmd(UV_SYNC_CMD, cwd=COMFYUI_DIR, env={"VIRTUAL_ENV": COMFYUI_DIR})
             log_warning(f"Reset venv output: {out} {rc}")
             if rc == 0:
                 result_data["steps"]["reset_venv"]["success"] = True
