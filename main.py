@@ -504,193 +504,230 @@ def create_json_result_template(node_name):
     }
 
 def main():
-    if not os.path.exists(COMFYUI_DIR):
-        log_error(f"ComfyUI directory not found at {COMFYUI_DIR}")
-        log_error("Please set the correct COMFYUI_DIR at the top of the script")
-        return
-
-    results = []
+    # Add this at the beginning of main to track the ComfyUI process
+    comfy_process = None
     
-    logger.info(f"Starting test of {len(TOP_NODES)} custom nodes...")
-    logger.info(f"ComfyUI directory: {COMFYUI_DIR}")
-    logger.info(f"ComfyUI port: {COMFYUI_PORT}")
-    log_separator()
+    try:
+        if not os.path.exists(COMFYUI_DIR):
+            log_error(f"ComfyUI directory not found at {COMFYUI_DIR}")
+            log_error("Please set the correct COMFYUI_DIR at the top of the script")
+            return
 
-    for i, node in enumerate(TOP_NODES):
-        node_name = node["id"]
-        log_colored(f"\n[{i+1}/{len(TOP_NODES)}] Testing node: {node_name}", Fore.CYAN)
-        log_separator("=")
+        results = []
         
-        result_data = create_json_result_template(node_name)
-        # Define comfy_process at the beginning of the loop
-        comfy_process = None
-
-        try:
-            # --------------------------------------------------------------------
-            # STEP 1: Freeze the requirements.txt (before installing node)
-            # --------------------------------------------------------------------
-            logger.info(f"STEP 1: Reset the pip environment before installing {node_name}...")
-           
-            # Before running UV_SYNC_CMD, remove the .venv folder if it exists
-            venv_path = os.path.join(COMFYUI_DIR, '.venv')
-            if os.path.exists(venv_path):
-                shutil.rmtree(venv_path)
-                print(f"Removed existing .venv folder at {venv_path}")
-
-            # Now run the sync command to recreate the environment
-            rc, out, err = run_cmd(UV_SYNC_CMD, cwd=COMFYUI_DIR, env={"VIRTUAL_ENV": COMFYUI_DIR})
-            log_warning(f"Reset venv output: {out} {rc}")
-            if rc == 0:
-                result_data["steps"]["reset_venv"]["success"] = True
-            else:
-                result_data["steps"]["reset_venv"]["error_message"] = err
-                result_data["final_outcome"] = "FAILED_RESET_VENV"
-                log_fatal(f"Failed to reset venv: {err}")
-                results.append(result_data)
-                return
-
-            # --------------------------------------------------------------------
-            # STEP 2: Install the custom node using Manager
-            # --------------------------------------------------------------------
-            logger.info(f"STEP 2: Installing node {node_name}...")
-            cmd_install_node = f"{VENV_PYTHON} custom_nodes/ComfyUI-Manager/cm-cli.py install {node_name}"
-            rc, out, err = run_cmd(cmd_install_node, cwd=COMFYUI_DIR)
-            if rc == 0:
-                result_data["steps"]["install_node_status"]["success"] = True
-                log_success(f"Node {node_name} installed successfully")
-            else:
-                result_data["steps"]["install_node_status"]["error_message"] = err
-                result_data["final_outcome"] = "FAILED_INSTALL_NODE"
-                log_error(f"Failed to install node: {err}")
-                results.append(result_data)
-                continue
-            result_data["steps"]["install_node_status"]["install_log"] = out + "\n" + err
-
-            # --------------------------------------------------------------------
-            # STEP 3: Start ComfyUI and wait for it to be ready
-            # --------------------------------------------------------------------
-            logger.info("STEP 3: Starting ComfyUI server...")
-            cmd_start_comfyui = "uv run main.py"
-            comfy_process = subprocess.Popen(cmd_start_comfyui.split(), cwd=COMFYUI_DIR)
-            
-            # Wait for ComfyUI to start (max 60 seconds)
-            start_time = time.time()
-            server_ready = False
-            log_warning("Waiting for ComfyUI server to start (timeout: 60s)...")
-            while time.time() - start_time < 60:
-                try:
-                    response = requests.get("http://127.0.0.1:8188/queue", timeout=1)
-                    if response.status_code == 200:
-                        server_ready = True
-                        log_success(f"ComfyUI server started after {int(time.time() - start_time)} seconds")
-                        break
-                except requests.exceptions.RequestException:
-                    time.sleep(1)
-                    continue
-
-            if server_ready:
-                result_data["steps"]["restart_comfyui_status"]["success"] = True
-            else:
-                result_data["steps"]["restart_comfyui_status"]["error_message"] = "Server failed to start within 60 seconds"
-                result_data["final_outcome"] = "FAILED_START_COMFY"
-                log_error("ComfyUI server failed to start within timeout period")
-                if comfy_process:
-                    comfy_process.terminate()
-                    comfy_process.wait()
-                results.append(result_data)
-                continue
-
-            # --------------------------------------------------------------------
-            # STEP 4: Check object_info to verify custom node installation
-            # --------------------------------------------------------------------
-            logger.info(f"STEP 4: Checking if node {node_name} is properly installed...")
-            try:
-                response = requests.get(f"http://127.0.0.1:{COMFYUI_PORT}/object_info", timeout=5)
-                if response.status_code == 200:
-                    object_info = response.json()
-                    found, details = check_node_in_object_info(node_name, object_info)
-                    result_data["steps"]["object_info_check"]["success"] = True
-                    result_data["steps"]["object_info_check"]["found_in_object_info"] = found
-                    result_data["steps"]["object_info_check"]["object_info_details"] = details
-                    
-                    if found:
-                        log_success(f"Node {node_name} found in object_info")
-                    else:
-                        log_error(f"Node {node_name} NOT found in object_info")
-                else:
-                    result_data["steps"]["object_info_check"]["success"] = False
-                    result_data["steps"]["object_info_check"]["error_message"] = f"Status code {response.status_code}"
-                    log_error(f"Failed to get object_info: Status code {response.status_code}")
-            except Exception as e:
-                result_data["steps"]["object_info_check"]["success"] = False
-                result_data["steps"]["object_info_check"]["error_message"] = str(e)
-                log_error(f"Error checking object_info: {str(e)}")
-            finally:
-                # Cleanup ComfyUI process
-                if comfy_process:
-                    log_warning("Terminating ComfyUI server...")
-                    comfy_process.terminate()
-                    comfy_process.wait()
-
-            # --------------------------------------------------------------------
-            # STEP 5: Uninstall the custom node
-            # --------------------------------------------------------------------
-            logger.info(f"STEP 5: Uninstalling node {node_name}...")
-            cmd_uninstall_node = f"uv run custom_nodes/ComfyUI-Manager/cm-cli.py uninstall {node_name}"
-            rc, out, err = run_cmd(cmd_uninstall_node, cwd=COMFYUI_DIR)
-            if rc == 0:
-                result_data["steps"]["uninstall_node_status"]["success"] = True
-                log_success(f"Node {node_name} uninstalled successfully")
-            else:
-                result_data["steps"]["uninstall_node_status"]["error_message"] = err
-                log_error(f"Failed to uninstall node: {err}")
-            result_data["steps"]["uninstall_node_status"]["uninstall_log"] = out + "\n" + err
-
-            # --------------------------------------------------------------------
-            # Final outcome
-            # --------------------------------------------------------------------
-            if not result_data["steps"]["object_info_check"]["success"]:
-                result_data["final_outcome"] = "FAILED_OBJECT_INFO_CHECK"
-                log_error("Final outcome: FAILED_OBJECT_INFO_CHECK")
-            elif not result_data["steps"]["object_info_check"]["found_in_object_info"]:
-                result_data["final_outcome"] = "FAILED_NODE_NOT_FOUND"
-                log_error("Final outcome: FAILED_NODE_NOT_FOUND")
-            else:   
-                result_data["final_outcome"] = "PASSED"
-                log_success("Final outcome: PASSED")
-
-        except Exception as e:
-            # Catch any unexpected errors to ensure we continue with the next node
-            log_error(f"Unexpected error testing node {node_name}: {str(e)}")
-            result_data["final_outcome"] = "UNEXPECTED_ERROR"
-            result_data["error_message"] = str(e)
-            
-            # Make sure to terminate ComfyUI if it's running
-            if comfy_process is not None:
-                comfy_process.terminate()
-                comfy_process.wait()
-
-        # Add to overall results
-        results.append(result_data)
+        logger.info(f"Starting test of {len(TOP_NODES)} custom nodes...")
+        logger.info(f"ComfyUI directory: {COMFYUI_DIR}")
+        logger.info(f"ComfyUI port: {COMFYUI_PORT}")
         log_separator()
 
-    # ------------------------------------------------------------------------
-    # Save results to a JSON file
-    # ------------------------------------------------------------------------
-    timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    out_filename = f"comfyui_test_results_{timestamp}.json"
-    with open(out_filename, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2)
+        for i, node in enumerate(TOP_NODES):
+            node_name = node["id"]
+            log_colored(f"\n[{i+1}/{len(TOP_NODES)}] Testing node: {node_name}", Fore.CYAN)
+            log_separator("=")
+            
+            result_data = create_json_result_template(node_name)
+            # Define comfy_process at the beginning of the loop
+            comfy_process = None
 
-    # Print summary
-    logger.info("\nTest Summary:")
-    log_separator("=")
-    passed = sum(1 for r in results if r["final_outcome"] == "PASSED")
-    failed = len(results) - passed
-    logger.info(f"Total nodes tested: {len(results)}")
-    log_colored(f"Passed: {passed}", Fore.GREEN)
-    log_colored(f"Failed: {failed}", Fore.RED)
-    logger.info(f"Test results saved to {out_filename}")
+            try:
+                # --------------------------------------------------------------------
+                # STEP 1: Freeze the requirements.txt (before installing node)
+                # --------------------------------------------------------------------
+                logger.info(f"STEP 1: Reset the pip environment before installing {node_name}...")
+               
+                # Before running UV_SYNC_CMD, remove the .venv folder if it exists
+                venv_path = os.path.join(COMFYUI_DIR, '.venv')
+                if os.path.exists(venv_path):
+                    shutil.rmtree(venv_path)
+                    print(f"Removed existing .venv folder at {venv_path}")
+
+                # Now run the sync command to recreate the environment
+                rc, out, err = run_cmd(UV_SYNC_CMD, cwd=COMFYUI_DIR, env={"VIRTUAL_ENV": COMFYUI_DIR})
+                log_warning(f"Reset venv output: {out} {rc}")
+                if rc == 0:
+                    result_data["steps"]["reset_venv"]["success"] = True
+                else:
+                    result_data["steps"]["reset_venv"]["error_message"] = err
+                    result_data["final_outcome"] = "FAILED_RESET_VENV"
+                    log_fatal(f"Failed to reset venv: {err}")
+                    results.append(result_data)
+                    continue
+
+                # --------------------------------------------------------------------
+                # STEP 2: Install the custom node using Manager
+                # --------------------------------------------------------------------
+                logger.info(f"STEP 2: Installing node {node_name}...")
+                cmd_install_node = f"{VENV_PYTHON} custom_nodes/ComfyUI-Manager/cm-cli.py install {node_name}"
+                rc, out, err = run_cmd(cmd_install_node, cwd=COMFYUI_DIR)
+                if rc == 0:
+                    result_data["steps"]["install_node_status"]["success"] = True
+                    log_success(f"Node {node_name} installed successfully")
+                else:
+                    result_data["steps"]["install_node_status"]["error_message"] = err
+                    result_data["final_outcome"] = "FAILED_INSTALL_NODE"
+                    log_error(f"Failed to install node: {err}")
+                    results.append(result_data)
+                    continue
+                result_data["steps"]["install_node_status"]["install_log"] = out + "\n" + err
+
+                # --------------------------------------------------------------------
+                # STEP 3: Start ComfyUI and wait for it to be ready
+                # --------------------------------------------------------------------
+                logger.info("STEP 3: Starting ComfyUI server...")
+                cmd_start_comfyui = "uv run main.py"
+                comfy_process = subprocess.Popen(cmd_start_comfyui.split(), cwd=COMFYUI_DIR)
+                
+                # Wait for ComfyUI to start (max 60 seconds)
+                start_time = time.time()
+                server_ready = False
+                log_warning("Waiting for ComfyUI server to start (timeout: 60s)...")
+                while time.time() - start_time < 60:
+                    try:
+                        response = requests.get("http://127.0.0.1:8188/queue", timeout=1)
+                        if response.status_code == 200:
+                            server_ready = True
+                            log_success(f"ComfyUI server started after {int(time.time() - start_time)} seconds")
+                            break
+                    except requests.exceptions.RequestException:
+                        time.sleep(1)
+                        continue
+
+                if server_ready:
+                    result_data["steps"]["restart_comfyui_status"]["success"] = True
+                else:
+                    result_data["steps"]["restart_comfyui_status"]["error_message"] = "Server failed to start within 60 seconds"
+                    result_data["final_outcome"] = "FAILED_START_COMFY"
+                    log_error("ComfyUI server failed to start within timeout period")
+                    if comfy_process:
+                        comfy_process.terminate()
+                        comfy_process.wait()
+                    results.append(result_data)
+                    continue
+
+                # --------------------------------------------------------------------
+                # STEP 4: Check object_info to verify custom node installation
+                # --------------------------------------------------------------------
+                logger.info(f"STEP 4: Checking if node {node_name} is properly installed...")
+                try:
+                    response = requests.get(f"http://127.0.0.1:{COMFYUI_PORT}/object_info", timeout=5)
+                    if response.status_code == 200:
+                        object_info = response.json()
+                        found, details = check_node_in_object_info(node_name, object_info)
+                        result_data["steps"]["object_info_check"]["success"] = True
+                        result_data["steps"]["object_info_check"]["found_in_object_info"] = found
+                        result_data["steps"]["object_info_check"]["object_info_details"] = details
+                        
+                        if found:
+                            log_success(f"Node {node_name} found in object_info")
+                        else:
+                            log_error(f"Node {node_name} NOT found in object_info")
+                    else:
+                        result_data["steps"]["object_info_check"]["success"] = False
+                        result_data["steps"]["object_info_check"]["error_message"] = f"Status code {response.status_code}"
+                        log_error(f"Failed to get object_info: Status code {response.status_code}")
+                except Exception as e:
+                    result_data["steps"]["object_info_check"]["success"] = False
+                    result_data["steps"]["object_info_check"]["error_message"] = str(e)
+                    log_error(f"Error checking object_info: {str(e)}")
+                finally:
+                    # Cleanup ComfyUI process
+                    if comfy_process:
+                        log_warning("Terminating ComfyUI server...")
+                        comfy_process.terminate()
+                        comfy_process.wait()
+
+                # --------------------------------------------------------------------
+                # STEP 5: Uninstall the custom node
+                # --------------------------------------------------------------------
+                logger.info(f"STEP 5: Uninstalling node {node_name}...")
+                cmd_uninstall_node = f"uv run custom_nodes/ComfyUI-Manager/cm-cli.py uninstall {node_name}"
+                rc, out, err = run_cmd(cmd_uninstall_node, cwd=COMFYUI_DIR)
+                if rc == 0:
+                    result_data["steps"]["uninstall_node_status"]["success"] = True
+                    log_success(f"Node {node_name} uninstalled successfully")
+                else:
+                    result_data["steps"]["uninstall_node_status"]["error_message"] = err
+                    log_error(f"Failed to uninstall node: {err}")
+                result_data["steps"]["uninstall_node_status"]["uninstall_log"] = out + "\n" + err
+
+                # --------------------------------------------------------------------
+                # Final outcome
+                # --------------------------------------------------------------------
+                if not result_data["steps"]["object_info_check"]["success"]:
+                    result_data["final_outcome"] = "FAILED_OBJECT_INFO_CHECK"
+                    log_error("Final outcome: FAILED_OBJECT_INFO_CHECK")
+                elif not result_data["steps"]["object_info_check"]["found_in_object_info"]:
+                    result_data["final_outcome"] = "FAILED_NODE_NOT_FOUND"
+                    log_error("Final outcome: FAILED_NODE_NOT_FOUND")
+                else:   
+                    result_data["final_outcome"] = "PASSED"
+                    log_success("Final outcome: PASSED")
+
+            except Exception as e:
+                # Catch any unexpected errors to ensure we continue with the next node
+                log_error(f"Unexpected error testing node {node_name}: {str(e)}")
+                result_data["final_outcome"] = "UNEXPECTED_ERROR"
+                result_data["error_message"] = str(e)
+            
+            finally:
+                # Always terminate ComfyUI process if it exists
+                if comfy_process is not None:
+                    try:
+                        log_warning("Terminating ComfyUI server...")
+                        comfy_process.terminate()
+                        # Add a timeout to wait() to prevent hanging indefinitely
+                        comfy_process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        # If terminate doesn't work, try kill (more forceful)
+                        log_error("ComfyUI process didn't terminate, forcing kill...")
+                        comfy_process.kill()
+                        try:
+                            comfy_process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            log_error("Failed to kill ComfyUI process!")
+                    except Exception as e:
+                        log_error(f"Error while terminating ComfyUI: {str(e)}")
+                    comfy_process = None
+
+            # Add to overall results
+            results.append(result_data)
+            log_separator()
+
+        # ------------------------------------------------------------------------
+        # Save results to a JSON file
+        # ------------------------------------------------------------------------
+        timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        out_filename = f"comfyui_test_results_{timestamp}.json"
+        with open(out_filename, "w", encoding="utf-8") as f:
+            json.dump(results, f, indent=2)
+
+        # Print summary
+        logger.info("\nTest Summary:")
+        log_separator("=")
+        passed = sum(1 for r in results if r["final_outcome"] == "PASSED")
+        failed = len(results) - passed
+        logger.info(f"Total nodes tested: {len(results)}")
+        log_colored(f"Passed: {passed}", Fore.GREEN)
+        log_colored(f"Failed: {failed}", Fore.RED)
+        logger.info(f"Test results saved to {out_filename}")
+
+    except KeyboardInterrupt:
+        log_warning("Script interrupted by user")
+    except Exception as e:
+        log_error(f"Unexpected error in main: {str(e)}")
+    finally:
+        # Final cleanup in case of unexpected exit from the main loop
+        if comfy_process is not None:
+            try:
+                log_warning("Terminating ComfyUI server (final cleanup)...")
+                comfy_process.terminate()
+                comfy_process.wait(timeout=10)
+            except:
+                try:
+                    comfy_process.kill()
+                    comfy_process.wait(timeout=5)
+                except:
+                    log_error("Failed to terminate ComfyUI in final cleanup")
 
 if __name__ == "__main__":
     main()
