@@ -7,6 +7,7 @@ import os
 import logging
 import sys
 from colorama import init, Fore, Style
+import shutil
 
 # Initialize colorama
 init(autoreset=True)
@@ -529,6 +530,14 @@ def main():
             # STEP 1: Freeze the requirements.txt (before installing node)
             # --------------------------------------------------------------------
             logger.info(f"STEP 1: Reset the pip environment before installing {node_name}...")
+           
+            # Before running UV_SYNC_CMD, remove the .venv folder if it exists
+            venv_path = os.path.join(COMFYUI_DIR, '.venv')
+            if os.path.exists(venv_path):
+                shutil.rmtree(venv_path)
+                print(f"Removed existing .venv folder at {venv_path}")
+
+            # Now run the sync command to recreate the environment
             rc, out, err = run_cmd(UV_SYNC_CMD, cwd=COMFYUI_DIR, env={"VIRTUAL_ENV": COMFYUI_DIR})
             log_warning(f"Reset venv output: {out} {rc}")
             if rc == 0:
