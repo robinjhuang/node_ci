@@ -111,7 +111,7 @@ def setup_venv(comfy_dir):
         python_path = os.path.join(comfy_dir, ".venv", "bin", "python")
     
     # Ensure pip is installed in the venv
-    success, _, _ = run_command(f"{python_path} -m ensurepip", cwd=comfy_dir)
+    success, _, _ = run_command(f"{python_path} -m ensurepip --upgrade", cwd=comfy_dir)
     return success
 
 def install_dependencies(comfy_dir):
