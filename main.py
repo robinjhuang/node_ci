@@ -596,6 +596,7 @@ def main():
                 log_error("ComfyUI server failed to start within timeout period")
                 if comfy_process:
                     comfy_process.terminate()
+                    comfy_process.wait()
                 results.append(result_data)
                 continue
 
